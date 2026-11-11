@@ -1,0 +1,294 @@
+{
+  "section_basic": {
+    "type": "section",
+    "name": "基础",
+    "collapsed": false,
+    "fields": {
+      "enabled": {
+        "type": "switch",
+        "name": "启用插件",
+        "default": true
+      },
+      "max_results": {
+        "type": "integer",
+        "name": "每个引擎返回条数",
+        "default": 5,
+        "hint": "每个搜索引擎最多返回几条结果，越多越占 token"
+      },
+      "timeout": {
+        "type": "integer",
+        "name": "单引擎超时（秒）",
+        "default": 20,
+        "hint": "单引擎超时（秒）——作用于 SauceNAO/IQDB/百度/Yandex 等引擎的每次 HTTP 请求；不作用于千问（千问时限由本插件千问区配置控制）"
+      },
+      "cache_days": {
+        "type": "integer",
+        "name": "结果缓存天数",
+        "default": 0,
+        "hint": "同一张图（md5 相同）在缓存期内直接返回缓存，0 请求 0 token；0 表示不缓存"
+      },
+      "enable_min_sim": {
+        "type": "switch",
+        "name": "启用相似度阈值",
+        "default": true,
+        "hint": "开启后，低于阈值的搜索结果不返回不显示（SauceNAO/IQDB/trace.moe 有效）"
+      },
+      "min_similarity": {
+        "type": "integer",
+        "name": "相似度阈值（%）",
+        "default": 40,
+        "hint": "低于该相似度（0-100）的结果视为噪声不显示"
+      }
+    }
+  },
+  "section_network": {
+    "type": "section",
+    "name": "网络与代理",
+    "collapsed": false,
+    "fields": {
+      "proxy": {
+        "type": "string",
+        "name": "海外引擎代理",
+        "default": "",
+        "hint": "海外引擎（Gemini/SauceNAO/IQDB/trace.moe/Yandex/GoogleLens）使用的代理，如 http://127.0.0.1:7890；留空则读系统环境变量"
+      },
+      "domestic_direct": {
+        "type": "switch",
+        "name": "国内引擎直连",
+        "default": true,
+        "hint": "国内引擎（千问/百度）直连不走代理。开启系统代理时国内服务被绕行海外会又慢又易断，是千问超时/ConnectError 的常见原因，强烈建议开启"
+      }
+    }
+  },
+  "section_gemini": {
+    "type": "section",
+    "name": "Gemini 谷歌AI搜索",
+    "collapsed": false,
+    "fields": {
+      "enable_gemini": {
+        "type": "switch",
+        "name": "启用 Gemini 谷歌AI搜索",
+        "default": true,
+        "hint": "传图给 Gemini 并启用谷歌搜索验证（等同谷歌AI搜索模式）；表情包/梗图/通用图场景的主力"
+      },
+      "gemini_key": {
+        "type": "sensitive",
+        "name": "Gemini API Key",
+        "default": "",
+        "hint": "在 aistudio.google.com 免费创建；免费档含 500 次/天谷歌搜索验证额度"
+      },
+      "gemini_model": {
+        "type": "string",
+        "name": "Gemini 模型",
+        "default": "gemini-3.5-flash",
+        "hint": "需支持谷歌搜索验证（grounding）的模型；旧模型被谷歌停用(404)时会自动回退候选模型"
+      }
+    }
+  },
+  "section_baidu": {
+    "type": "section",
+    "name": "百度识图",
+    "collapsed": false,
+    "fields": {
+      "enable_baidu": {
+        "type": "switch",
+        "name": "启用百度识图",
+        "default": true,
+        "hint": "免 key 免人机验证；中文互联网相似图来源（抖音/微博/B站等），表情包场景有效"
+      }
+    }
+  },
+  "section_yandex": {
+    "type": "section",
+    "name": "Yandex 识图",
+    "collapsed": false,
+    "fields": {
+      "enable_yandex": {
+        "type": "switch",
+        "name": "启用 Yandex 识图",
+        "default": true,
+        "hint": "免 key，俄语区索引强，人物/角色识别补充；给出图片内容标签和包含此图的网页。结果多为俄语等外文，不翻译，交由 LLM 自行翻译理解"
+      }
+    }
+  },
+  "section_qwen": {
+    "type": "section",
+    "name": "千问图搜图（阿里云百炼）",
+    "collapsed": false,
+    "fields": {
+      "enable_qwen": {
+        "type": "switch",
+        "name": "启用千问图搜图",
+        "default": true,
+        "hint": "Responses API + image_search 图搜图工具（单工具+强制单次搜索+关思考），复刻千问网页端识图效果"
+      },
+      "qwen_key": {
+        "type": "sensitive",
+        "name": "百炼 API Key",
+        "default": "",
+        "hint": "在 bailian.console.aliyun.com 创建 API Key（与 KiraAI 百炼 provider 可共用）"
+      },
+      "qwen_region": {
+        "type": "string",
+        "name": "地域",
+        "default": "beijing",
+        "options": ["beijing", "singapore"],
+        "hint": "API 地域：beijing（国内直连，推荐）或 singapore"
+      },
+      "qwen_model": {
+        "type": "string",
+        "name": "千问模型",
+        "default": "qwen3.7-plus",
+        "hint": "默认 qwen3.7-plus：官方图搜图推荐模型（官方示例均用此）；想更快可试 qwen3.6-flash 但官方注明效果不如推荐模型；qwen3.7-max 需 qwen3.7-max-2026-06-08 才支持图搜图工具。3.5/3.6 系仅支持 Responses API。不支持时自动回退。⚠️ 若你升级前保存过配置，旧模型名会保留，请手动确认此处为 qwen3.7-plus"
+      },
+      "enable_qwen_image_search": {
+        "type": "switch",
+        "name": "启用图搜图工具",
+        "default": true,
+        "hint": "⚠️ image_search 工具按次收费约 0.048 元/次。已做提速：单工具 + 关思考 + 流式提前截获图搜结果（模型总结卡 15s 提前返回），实测 10~35s。命令通道两段式发送：快速引擎先回、千问结果补发；关闭后千问退化为 web_search 单工具联网搜索（识图能力大减）"
+      },
+      "enable_qwen_web_search": {
+        "type": "switch",
+        "name": "追加联网搜索核实",
+        "default": false,
+        "hint": "开启后在图搜图之外追加 web_search 工具联网核实，更准但更慢更贵（agent 模式多轮搜索，约 4 元/千次）"
+      },
+      "enable_qwen_in_tool": {
+        "type": "switch",
+        "name": "LLM 工具通道也跑千问图搜图",
+        "default": false,
+        "hint": "默认关：工具通道追求 <20s 响应（百度猜测词+SauceNAO+Gemini 等证据由主模型合成，已够准）；开启后时限自动钳到 50s（框架 60s 工具超时），超时降级且每次收 0.048 元"
+      },
+      "qwen_timeout": {
+        "type": "integer",
+        "name": "千问图搜图时限（秒）",
+        "default": 180,
+        "hint": "命令通道补发用；图搜图工具后端官方承认\"需要较长处理时间\"（服务端上限 300s），实测波动 28~150s，180 成功率更高；工具通道仍自动钳 50。工具通道若仍超时，可在 KiraAI 配置 bot_config.agent.tool_call_timeout 调大到 120 并相应调高本值；或保持 enable_qwen_in_tool 关闭，靠百度/Yandex/SauceNAO 证据由主模型合成"
+      }
+    }
+  },
+  "section_lens": {
+    "type": "section",
+    "name": "Google Lens（SerpApi）",
+    "collapsed": true,
+    "fields": {
+      "enable_serpapi": {
+        "type": "switch",
+        "name": "启用 Google Lens",
+        "default": false,
+        "hint": "通过 SerpApi 调用 Google Lens（通用图片场景，二次元不如 SauceNAO 准）；100次/月免费额度"
+      },
+      "serpapi_key": {
+        "type": "sensitive",
+        "name": "SerpApi Key",
+        "default": "",
+        "hint": "在 serpapi.com 注册获取；留空则自动停用"
+      }
+    }
+  },
+  "section_anime": {
+    "type": "section",
+    "name": "二次元专用引擎",
+    "collapsed": false,
+    "fields": {
+      "enable_saucenao": {
+        "type": "switch",
+        "name": "启用 SauceNAO",
+        "default": true,
+        "hint": "二次元原图定位（Pixiv 出处/画师/相似度），识别动漫角色比 Google 更准"
+      },
+      "saucenao_key": {
+        "type": "sensitive",
+        "name": "SauceNAO API Key",
+        "default": "",
+        "hint": "★主力引擎★ 在 saucenao.com 免费注册后在 API 页获取；留空则自动停用，识别精度大幅下降"
+      },
+      "enable_iqdb": {
+        "type": "switch",
+        "name": "启用 IQDB",
+        "default": true,
+        "hint": "免 key，搜索 Danbooru/Gelbooru 等图库的精确匹配（给出处链接）"
+      },
+      "enable_tracemoe": {
+        "type": "switch",
+        "name": "启用 trace.moe",
+        "default": true,
+        "hint": "动画截图专用（识别出自哪部番第几集），免 key；同人图/表情包无效"
+      },
+      "tracemoe_in_image_search": {
+        "type": "switch",
+        "name": "搜图也跑 trace.moe",
+        "default": false,
+        "hint": "trace.moe 只对番剧截图有效，官方称相似度 <90% 基本为错误结果；搜图默认不含它（搜番专用），开启后通用搜图也会带上"
+      }
+    }
+  },
+  "section_command": {
+    "type": "section",
+    "name": "命令直达（0 token）",
+    "collapsed": false,
+    "fields": {
+      "enable_command": {
+        "type": "switch",
+        "name": "启用搜图命令",
+        "default": false,
+        "hint": "命中命令词时直接用全部引擎搜图并回复，不走 LLM"
+      },
+      "command_words": {
+        "type": "list",
+        "name": "搜图命令词",
+        "default": ["/搜图", "/识别图片"],
+        "hint": "用户发送命令词（可带图、或回复图片消息）时以图搜图"
+      },
+      "enable_command_anime": {
+        "type": "switch",
+        "name": "启用搜番命令",
+        "default": false,
+        "hint": "仅用 trace.moe 识别动画截图出自哪部番第几集"
+      },
+      "command_words_anime": {
+        "type": "list",
+        "name": "搜番命令词",
+        "default": ["/搜番"],
+        "hint": "动画截图专用命令"
+      },
+      "send_thumbnail": {
+        "type": "switch",
+        "name": "回复带最佳匹配缩略图",
+        "default": false,
+        "hint": "⚠️ 注意：开启后回复会附带搜索到的预览图，可能出现 NSFW 内容"
+      },
+      "send_forward": {
+        "type": "switch",
+        "name": "合并转发形式回复",
+        "default": true,
+        "hint": "仅 QQ 系（NapCat/OneBot）生效：结果以合并转发卡片发送；其他平台与失败情况自动降级为普通消息"
+      },
+      "allowed_users": {
+        "type": "list",
+        "name": "命令白名单",
+        "default": [],
+        "hint": "只有列表中的用户 ID 可以使用命令直达，留空表示所有人可用"
+      }
+    }
+  },
+  "section_tool": {
+    "type": "section",
+    "name": "LLM 工具",
+    "collapsed": false,
+    "fields": {
+      "enable_tool": {
+        "type": "switch",
+        "name": "启用搜图工具 search_image",
+        "default": true,
+        "hint": "注册 search_image 工具，让 bot 自主以图搜图（全引擎）"
+      },
+      "enable_tool_anime": {
+        "type": "switch",
+        "name": "启用搜番工具 search_anime",
+        "default": true,
+        "hint": "注册 search_anime 工具，让 bot 自主识别动画截图出处（仅 trace.moe）"
+      }
+    }
+  }
+}
