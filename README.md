@@ -6,7 +6,7 @@
 |---|---|
 | 插件名 | 以图搜图 |
 | ID | `image_search` |
-| 版本 | 2.3.1 |
+| 版本 | 2.4.0 |
 | 作者 | znq19 |
 | 适用框架 | KiraAI `>=2.6.1`（已在 **v3.1.2** 实测通过） |
 
@@ -25,10 +25,15 @@
 | **IQDB** | Danbooru / Gelbooru 等图库的精确匹配 | 不要 | 开 |
 | **trace.moe** | 动画截图：出自哪部番、第几集 | 不要 | 开（只用于「搜番」） |
 | **百度识图** | 中文互联网：表情包、梗图、抖音/微博/B站来源 | 不要 | 开 |
+| **DeepSeek 图搜 ★推荐** | 二创表情包 / 梗图：官方视觉 + 联网图搜并附引用 | 要（按量计费，用多少扣多少） | 开（没填 Key 自动停用） |
 | **Yandex 识图** | 俄语区索引，人物/角色补充 | 不要 | 开 |
 | **Gemini 谷歌AI搜索** | 让 Gemini 看图并用谷歌搜索验证 | 要（有免费额度） | 开（没填 Key 自动停用） |
-| **千问图搜图** | 阿里云百炼的图搜图工具，效果接近网页端 | 要（按次收费） | 开（没填 Key 自动停用） |
+| **千问图搜图（不推荐）** | 阿里云百炼图搜图，效果接近网页端但**很慢** | 要（约 0.048 元/次） | 开（没填 Key 自动停用） |
 | **Google Lens（SerpApi）** | 通用图片、实物、网页来源 | 要（100次/月免费） | **关** |
+
+> **怎么选**：二次元插画用 **SauceNAO + IQDB**；表情包/梗图用 **DeepSeek 图搜**（快、按量计费）；
+> 番剧截图用 **trace.moe**；中文互联网用 **百度**；Google Lens 按需。
+> **千问图搜不推荐**：0.048 元/次，且服务端常需 30–150 秒，容易超时。
 
 > 简单说：**不填任何 Key 也能用**（百度 / Yandex / IQDB / trace.moe 四个免 Key 引擎会工作）；想要更准，就免费注册一个 SauceNAO Key，这是二次元识别的主力。
 >
@@ -107,6 +112,7 @@ KiraAI/
 | 二次元识别（最推荐） | <https://saucenao.com> 免费注册 → API 页 | 「二次元专用引擎 → SauceNAO API Key」 |
 | 谷歌 AI 看图 | <https://aistudio.google.com> 免费创建 | 「Gemini → Gemini API Key」 |
 | 千问图搜图 | <https://bailian.console.aliyun.com> 创建 | 「千问 → 百炼 API Key」 |
+| DeepSeek 图搜（表情包/梗图推荐） | <https://platform.deepseek.com> 创建 | 「DeepSeek → DeepSeek API Key」 |
 | Google Lens | <https://serpapi.com> 注册 | 「Google Lens → SerpApi Key」 |
 
 **留空 = 该引擎自动停用**，不会报错，其他引擎照常工作。Key 是敏感字段，WebUI 里不会明文显示。
@@ -132,11 +138,38 @@ KiraAI/
 | 启用相似度阈值 | 开 | 低于阈值的结果不显示，避免噪声 |
 | 相似度阈值（%） | 40 | 低于 40% 的匹配会被丢掉 |
 
-### 千问图搜图（会花钱，看仔细）
+### DeepSeek 图搜（官方 API）
 
 | 配置 | 默认 | 说明 |
 |---|---|---|
-| 启用千问图搜图 | 开 | 没填 Key 时实际不跑 |
+| 启用 DeepSeek 图搜 | 开 | 官方 `deepseek-flash` 视觉 + `deepseek_web_search` 服务端图搜，回答带引用 |
+| 计费方式 | — | **token 费 + 图搜次数费**：图搜 $0.75/千次（约 0.005 元/次），token 另计；无包月、无最低消费；单次识别约 0.01–0.03 元（低峰） |
+| DeepSeek API Key | 空 | 在 platform.deepseek.com 创建；留空自动停用 |
+| 模型 ID | `deepseek-flash` | 官方填 `deepseek-flash`；第三方端点填对方的模型 ID（如 opencode 的 `deepseek-v4.1-flash`）；旧名 `deepseek-v4-flash-vision-exp` 仍可用 |
+| API Base URL | `https://api.deepseek.com` | 支持多种填法：`https://api.deepseek.com`、`https://xxx/v1`、`https://xxx/v1/chat/completions` 都行（带不带尾斜杠也可），插件自动补全且不会重复拼接 |
+| 额外请求头（JSON） | `{}` | 可选，如 `{"x-opencode-session":"ses_xxx"}`；可覆盖默认 Authorization |
+| 额外请求体（JSON） | `{}` | 可选，合并进请求体；同名键会覆盖插件默认值 |
+| DeepSeek 图搜时限（秒） | 60 | 含联网图搜耗时；工具通道自动钳到 50 秒 |
+| LLM 工具通道也跑 DeepSeek | **开** | 填了 Key 才生效；工具通道也会图搜（每次产生 token + 图搜费） |
+| 必须联网图搜才采纳 | **关** | 默认保留识图结果并标注「未使用在线搜图，可能不准确，仅供参考」；开启后未触发图搜会直接丢弃（会浪费已花的 token） |
+
+> **费用**：图搜按次收费（$0.75/千次 ≈ 0.005 元/次），不是只按 token；加上 token 后单次约 0.01–0.03 元（低峰）。
+>
+> 它最擅长处理 **二创 Q 版表情包 / 梗图**：这类图 SauceNAO/IQDB 往往查不到、百度/Yandex 只能定位作品，DeepSeek 会把梗文本一起检索，能定位到具体角色（实测《少女前线》MDR、《巧克甜恋》御园莓华都命中）。
+
+### 二次元专用
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| 启用 SauceNAO / IQDB / trace.moe | 都开 | 见上文表格 |
+| LLM 工具通道也跑 IQDB | **关** | IQDB 首次常 45–130 秒，默认只在命令通道跑；开启后工具通道也会等它 |
+| 搜图也跑 trace.moe | **关** | trace.moe 只对番剧截图有效，普通搜图默认不带它 |
+
+### 千问图搜图（不推荐：慢且按次收费）
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| 启用千问图搜图 | 开 | 没填 Key 时实际不跑；**默认建议关掉**，除非确实需要 |
 | 启用图搜图工具 | 开 | ⚠️ 按次收费约 0.048 元/次 |
 | 追加联网搜索核实 | **关** | 开了更准，但更慢更贵 |
 | LLM 工具通道也跑千问 | **关** | 开了工具通道会变慢且每次收费；命令通道不受影响 |
@@ -156,20 +189,13 @@ KiraAI/
 | 回复带缩略图 | **关** | ⚠️ 开了可能搜出不宜内容，酌情开启 |
 | 启用搜图工具 / 搜番工具 | 都开 | 关掉后 AI 就不会自动搜图了 |
 
-### 二次元专用
-
-| 配置 | 默认 | 说明 |
-|---|---|---|
-| 启用 SauceNAO / IQDB / trace.moe | 都开 | 见上文表格 |
-| 搜图也跑 trace.moe | **关** | trace.moe 只对番剧截图有效，普通搜图默认不带它 |
-
 ### Google Lens
 
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | 启用 Google Lens | **关** | 需要 SerpApi Key，100 次/月免费 |
 
-### 配置总览（37 项全表，按分组）
+### 配置总览（42 项全表，按分组）
 
 | 分组 | 配置项 | 默认值 |
 |---|---|---|
@@ -178,9 +204,10 @@ KiraAI/
 | Gemini 谷歌AI搜索 | 启用 Gemini 谷歌AI搜索 / Gemini API Key / Gemini 模型 | 开 / 空 / `gemini-3.5-flash` |
 | 百度识图 | 启用百度识图 | 开 |
 | Yandex 识图 | 启用 Yandex 识图 | 开 |
-| 千问图搜图 | 启用 / Key / 地域 / 模型 / 图搜图工具 / 联网核实 / 工具通道跑千问 / 时限 | 开 / 空 / `beijing` / `qwen3.7-plus` / 开 / **关** / **关** / 180秒 |
+| DeepSeek 图搜 ★ | 启用 / Key / 模型 ID / Base URL / 额外头 / 额外体 / 时限 / 工具通道跑 / 必须图搜 | 开 / 空 / `deepseek-flash` / `https://api.deepseek.com` / `{}` / `{}` / 60秒 / **开** / **关** |
+| 千问图搜图（不推荐） | 启用 / Key / 地域 / 模型 / 图搜图工具 / 联网核实 / 工具通道跑千问 / 时限 | 开 / 空 / `beijing` / `qwen3.7-plus` / 开 / **关** / **关** / 180秒 |
 | Google Lens | 启用 / SerpApi Key | **关** / 空 |
-| 二次元专用 | 启用 SauceNAO / SauceNAO API Key / 启用 IQDB / 启用 trace.moe / 搜图也跑 trace.moe | 开 / 空 / 开 / 开 / **关** |
+| 二次元专用 | 启用 SauceNAO / SauceNAO API Key / 启用 IQDB / LLM 工具通道也跑 IQDB / 启用 trace.moe / 搜图也跑 trace.moe | 开 / 空 / 开 / **关** / 开 / **关** |
 | 命令直达 | 启用搜图命令 / 搜图命令词 / 启用搜番命令 / 搜番命令词 / 回复带最佳匹配缩略图 / 合并转发形式回复 / 命令白名单 | **关** / `/搜图`,`/识别图片` / **关** / `/搜番` / **关** / 开 / 空 |
 | LLM 工具 | 启用搜图工具 search_image / 启用搜番工具 search_anime | 开 / 开 |
 
@@ -200,6 +227,7 @@ A：所有引擎都被关了，或者开了的引擎都缺 Key。至少留一个
 A：最常见是 **IQDB 首次请求特别慢**（服务端反爬，实测可能 30 秒以上）。可以：
 - 把「结果缓存天数」改成 7，重复图直接秒回；
 - 或把「启用 IQDB」关掉；
+- 工具通道默认已经**不跑 IQDB**（「LLM 工具通道也跑 IQDB」默认关），命令通道才会等它；
 - 或让管理员把 `bot_config.agent.tool_call_timeout` 调大。
 
 **Q：Yandex 结果是俄语/英文，看不懂？**
@@ -211,6 +239,21 @@ A：检查「国内引擎直连」是否开着、百炼 Key 是否正确、地�
 **Q：会不会很费 token？**
 A：用 `/搜图` 命令 = **0 token**（不进大模型）。AI 自动调用工具时，只有工具结果会进上下文，插件还会按「每个引擎返回条数」截断。工具描述和提示词是固定文字，能被 KiraAI 的 prompt 缓存复用，几乎不额外花钱。
 
+**Q：能接第三方 OpenAI 兼容端点吗（比如 opencode zen）？**
+A：可以。「API Base URL」直接粘贴对方地址即可（`.../v1` 或完整的 `.../v1/chat/completions` 都识别），「模型 ID」填对方的（如 opencode 的 `deepseek-v4.1-flash`），在「额外请求头（JSON）」里加第三方要求的头（如 `{"x-opencode-session":"ses_xxx"}`），必要时用「额外请求体（JSON）」加特殊参数。注意第三方端点未必实现 DeepSeek 官方的 `deepseek_web_search` 服务端图搜——实测 opencode 只支持普通 function calling，不会触发图搜；这种情况保持「必须联网图搜才采纳」关闭，结果会标注「未使用在线搜图」。
+
+**Q：升级插件后旧配置会丢吗？**
+A：不会。启动时会安全补全新版本新增的配置项（**只补缺失键，不覆盖你已保存的值**），日志会打印补了哪几项；已有配置、Key、开关都原样保留。
+
+**Q：DeepSeek 会不会只靠识图瞎猜？**
+A：默认**不丢弃**（钱已经花了）：没触发图搜时保留识图结果，并在 DeepSeek 那段下面单独一行标注「未使用在线搜图，可能不准确，仅供参考」。如果你宁可不要这种结果，把「必须联网图搜才采纳」打开，服务端没真正触发 `image_search` 时会直接丢弃。
+
+**Q：DeepSeek 会返回它搜到的图片来源吗？**
+A：会。插件从响应的 `server_tool_calls[].calls[].sources` 里提取完整来源（`title` / `url` / `site_name` / `image_url` / `snippet`），合并 `annotations` 去重。网页来源进「备查链接」，图片直链（`image_url`）也会进用户结果的来源列表。日志会打印 `sources=N, images=M, image_search=K, verified=True/False`。
+
+**Q：DeepSeek 图搜怎么收费？**
+A：**不是只按 token**。计费 = token 费 + 图搜次数费（$0.75/千次 ≈ 0.005 元/次）；单次识别约 0.01–0.03 元（低峰）。命令通道和工具通道默认都会跑（填 Key 后）；不想让聊天自动搜图，把「LLM 工具通道也跑 DeepSeek」关掉即可。没填 Key 时完全不调用。
+
 **Q：开了 Google Lens 但报图床上传失败？**
 A：目前图床上传会走海外代理，部分代理会返回 412。可以先把「海外引擎代理」留空试试，或暂时关掉 Google Lens（它默认就是关的）。
 
@@ -221,7 +264,7 @@ A：目前图床上传会走海外代理，部分代理会返回 412。可以先
 - 插件遵循 KiraAI 插件规范：`main.py` / `manifest.json` / `schema.json` / `requirements.txt`；配置面板由 `schema.json` 自动生成。
 - 用到的框架能力：`@on.im_message(Priority.HIGH)`（命令直达）、`@on.llm_request()`（注入固定工具提示）、`@register.tool`（两个工具）、`ctx.message_processor.send_message_chain`、`ctx.get_plugin_data_dir()`（缓存落盘）。
 - **全平台通用**：搜索、工具、命令、普通消息都不依赖特定适配器；只有「合并转发」是 QQ 系（NapCat/OneBot）专有能力，通过能力探测启用，其他平台（Telegram / Discord / Webchat / Bilibili / QQ 官方等）自动走普通消息。普通消息超过 1800 字符会按行分段，兼容 Discord 2000 字限制。
-- 所有引擎通过 `asyncio.gather` 并行发起；框架工具超时取消时会取消并回收未完成任务。
+- 9 个引擎通过 `asyncio.gather` 并行发起；框架工具超时取消时会取消并回收未完成任务。
 - 结果缓存以图片 md5 为键，空结果不写缓存。
 - 已在 **KiraAI v3.1.2** 用真实加载器验证：manifest 校验、schema 默认值、import、实例化、工具/钩子注册、`initialize`/`terminate` 全通过；连续 6 轮请求的静态 system prompt 逐字节一致，不破坏 prompt 缓存。
 
@@ -229,5 +272,27 @@ A：目前图床上传会走海外代理，部分代理会返回 412。可以先
 
 ## 八、致谢 / 引擎来源
 
-搜索能力由以下公开服务提供：SauceNAO、IQDB、trace.moe、百度识图、Yandex Images、Google Gemini、阿里云百炼（千问）、SerpApi（Google Lens）、litterbox 图床。
+搜索能力由以下公开服务提供：SauceNAO、IQDB、trace.moe、百度识图、Yandex Images、Google Gemini、阿里云百炼（千问）、DeepSeek（视觉 + 图搜）、SerpApi（Google Lens）、litterbox 图床。
 各服务的使用条款、免费额度与收费规则以其官网为准；本插件只是调用方，不托管任何图片内容。
+
+---
+
+## 九、更新日志
+
+<details>
+<summary>v2.4.0（2026-11-14）</summary>
+
+**首个按 KiraAI v3.1.2 完整审计的版本。**
+
+- 按 KiraAI v3.1.2（`8901374`）完整审计：真实加载器、manifest/schema、工具与钩子注册、Prompt 缓存不变量、并发/取消/缓存、命令端到端、多平台、边界。
+- **新增第 9 个引擎：DeepSeek 官方图搜**（`deepseek-flash` + `deepseek_web_search`），从 `server_tool_calls` 解析完整来源（`title` / `url` / `site_name` / `snippet` / `image_url`），图片直链也进入来源列表。
+- 新增「必须联网图搜才采纳」（默认关）：未触发图搜时保留结果，单独一行标注「未使用在线搜图，可能不准确，仅供参考」。
+- 新增模型 ID / API Base URL / 额外请求头 / 额外请求体，兼容第三方 OpenAI 端点；Base URL 支持 host、`/v1`、完整 `/chat/completions` 多种填法（带不带尾斜杠均可），自动补全且不重复拼接。
+- 新增 IQDB 工具通道开关（默认关）：IQDB 反爬延迟 45–130s，只在命令通道跑。
+- 配置组重排：DeepSeek 推荐置前 → 二次元 → 百度 → Yandex → Gemini → 千问（不推荐，折叠）→ Google Lens（折叠）。
+- 缓存修复：缓存键按通道命名空间（`noqwen` / `nodeepseek` / `noiqdb`）、关闭缓存时不计算 md5、命中时剔除内部 `ts`、`cache_days <= 0` 视为关闭。
+- 全平台：QQ 系合并转发改为能力探测（排除 `qq_official`），其他平台自动普通消息；长结果 1800 字符按行分段。
+- 老配置安全迁移：只补新增键，不覆盖已有值。
+- 新增本 README、插件图标（512×512）与 `repo` 字段；配置项 47 项。
+
+</details>

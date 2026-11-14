@@ -43,8 +43,77 @@ class _QwenResponsesHttpError(RuntimeError):
 
 
 class ImageSearchPlugin(BasePlugin):
+    # 老版本配置的安全迁移表：只补缺失键，绝不覆盖用户已保存的值。
+    _MIGRATION_DEFAULTS = {
+        "section_deepseek": {
+            "enable_deepseek": True,
+            "deepseek_key": "",
+            "deepseek_model": "deepseek-flash",
+            "deepseek_base_url": "https://api.deepseek.com",
+            "deepseek_extra_headers": {},
+            "deepseek_extra_body": {},
+            "deepseek_timeout": 60,
+            "deepseek_in_tool": True,
+            "deepseek_require_search": False,
+        },
+        "section_anime": {"iqdb_in_tool": False},
+    }
+
+    def _deepseek_chat_url(self) -> str:
+        """把用户填的 Base URL 归一化成 /chat/completions 完整地址。
+
+        兼容这些写法（大小写不敏感、允许尾斜杠）：
+          https://api.deepseek.com
+          https://api.deepseek.com/
+          https://opencode.ai/zen/go/v1
+          https://opencode.ai/zen/go/v1/
+          https://opencode.ai/zen/go/v1/chat/completions
+          https://opencode.ai/zen/go/v1/chat/completions/
+        已带 /chat/completions 的原样使用，不会重复拼接。
+        """
+        base = str(getattr(self, "deepseek_base_url", "") or "").strip().rstrip("/")
+        if not base:
+            base = "https://api.deepseek.com"
+        low = base.lower()
+        if low.endswith("/chat/completions"):
+            return base
+        return base + "/chat/completions"
+
+    @staticmethod
+    def _as_dict(value) -> dict:
+        """把 json 配置解析成 dict：兼容 WebUI 的 dict 与用户手填的 JSON 字符串。"""
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                logger.warning("[image_search] DeepSeek 额外头/体不是合法 JSON 对象，已忽略")
+        return {}
+
+    def _migrate_config(self):
+        """老用户配置安全迁移：补齐新版本新增的键，已有值原样保留。"""
+        added = []
+        cfg = self.plugin_cfg if isinstance(self.plugin_cfg, dict) else {}
+        for section, defaults in self._MIGRATION_DEFAULTS.items():
+            sec = cfg.get(section)
+            if not isinstance(sec, dict):
+                # 整个 section 缺失时交给框架 _ensure_plugin_config 补全
+                continue
+            for key, value in defaults.items():
+                if key not in sec:
+                    sec[key] = value
+                    added.append(f"{section}.{key}")
+        if added:
+            logger.info(
+                f"[image_search] 检测到旧版配置，已安全补全 {len(added)} 项（不覆盖已有值）: "
+                + ", ".join(added)
+            )
+
     def __init__(self, ctx, cfg: dict):
         super().__init__(ctx, cfg)
+        self._migrate_config()
 
         basic = cfg.get("section_basic", {})
         self.enabled = basic.get("enabled", True)
@@ -74,6 +143,19 @@ class ImageSearchPlugin(BasePlugin):
         yandex = cfg.get("section_yandex", {})
         self.enable_yandex = yandex.get("enable_yandex", True)
 
+        ds = cfg.get("section_deepseek", {})
+        self.enable_deepseek = ds.get("enable_deepseek", True)
+        self.deepseek_key = ds.get("deepseek_key", "")
+        self.deepseek_model = (ds.get("deepseek_model", "") or "deepseek-flash").strip()
+        self.deepseek_base_url = str(
+            ds.get("deepseek_base_url", "") or "https://api.deepseek.com"
+        ).strip().rstrip("/")
+        self.deepseek_extra_headers = self._as_dict(ds.get("deepseek_extra_headers"))
+        self.deepseek_extra_body = self._as_dict(ds.get("deepseek_extra_body"))
+        self.deepseek_timeout = int(ds.get("deepseek_timeout", 60) or 60)
+        self.deepseek_in_tool = ds.get("deepseek_in_tool", True)
+        self.deepseek_require_search = ds.get("deepseek_require_search", False)
+
         qwen = cfg.get("section_qwen", {})
         self.enable_qwen = qwen.get("enable_qwen", True)
         self.qwen_key = qwen.get("qwen_key", "")
@@ -88,6 +170,7 @@ class ImageSearchPlugin(BasePlugin):
         self.enable_saucenao = anime.get("enable_saucenao", True)
         self.saucenao_key = anime.get("saucenao_key", "")
         self.enable_iqdb = anime.get("enable_iqdb", True)
+        self.iqdb_in_tool = anime.get("iqdb_in_tool", False)
         self.enable_tracemoe = anime.get("enable_tracemoe", True)
         self.tracemoe_in_image_search = anime.get("tracemoe_in_image_search", False)
 
@@ -149,6 +232,8 @@ class ImageSearchPlugin(BasePlugin):
             engines.append("gemini" if self.gemini_key else "gemini(缺key,已停用)")
         if self.enable_qwen:
             engines.append("qwen" if self.qwen_key else "qwen(缺key,已停用)")
+        if self.enable_deepseek:
+            engines.append("deepseek" if self.deepseek_key else "deepseek(缺key,已停用)")
         if self.enable_serpapi:
             engines.append("serpapi-lens" if self.serpapi_key else "serpapi-lens(缺key,已停用)")
         logger.info(
@@ -861,6 +946,114 @@ class ImageSearchPlugin(BasePlugin):
                 sources.append((s.get("title", ""), u))
         return {"engine": "qwen", "model_used": model, "text": content, "sources": sources}
 
+# ---------------- 引擎：DeepSeek 官方图搜（deepseek-flash + deepseek_web_search） ----------------
+
+    _DEEPSEEK_PROMPT = (
+        "请先用图搜图/联网搜索查证，再回答：这张图里的角色是谁？出自哪部作品/游戏？"
+        "请给出判断依据。用简体中文，200字以内；不确定就直说不确定，不要编造。"
+    )
+
+    async def _deepseek_lens(self, client, img_bytes: bytes, filename: str,
+                             budget: float | None = None) -> dict:
+        """DeepSeek 官方图搜：deepseek-flash 视觉 + deepseek_web_search 服务端图搜。
+
+        DeepSeek 是国内服务，请求走直连 client；图片按千问同款策略预压缩。
+        服务端会自动发起图片搜索并在 annotations 里返回引用来源。
+        """
+        if not self.deepseek_key:
+            raise RuntimeError("未配置 DeepSeek API Key")
+        compressed = self._compress_for_qwen(img_bytes)
+        if compressed is not img_bytes:
+            img_bytes, mime = compressed, "image/jpeg"
+        else:
+            mime = "image/png" if filename.lower().endswith(".png") else "image/jpeg"
+        b64 = base64.b64encode(img_bytes).decode()
+        model = (self.deepseek_model or "deepseek-flash").strip()
+        body = {
+            "model": model,
+            "thinking": {"type": "disabled"},
+            "tools": [{"type": "deepseek_web_search"}],
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": self._DEEPSEEK_PROMPT},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+            ]}],
+            "max_tokens": 1200,
+        }
+        timeout = float(budget if budget is not None else self.deepseek_timeout)
+        # 合并第三方端点需要的额外请求体（同名键覆盖插件默认值）
+        if self.deepseek_extra_body:
+            body = {**body, **self.deepseek_extra_body}
+        headers = {"Authorization": f"Bearer {self.deepseek_key}"}
+        if self.deepseek_extra_headers:
+            headers.update(self.deepseek_extra_headers)
+        resp = await client.post(
+            self._deepseek_chat_url(),
+            headers=headers,
+            json=body,
+            timeout=httpx.Timeout(connect=15.0, read=timeout, write=30.0, pool=5.0),
+        )
+        if not resp.is_success:
+            err = resp.text[:200]
+            try:
+                err = (resp.json().get("error") or {}).get("message", err)
+            except Exception:
+                pass
+            raise RuntimeError(f"deepseek {resp.status_code}: {err}")
+        j = resp.json()
+        msg = ((j.get("choices") or [{}])[0].get("message") or {})
+        text = str(msg.get("content") or "").strip()
+
+        # server_tool_calls 里有完整的图搜来源（url/title/snippet/site_name/image_url），
+        # annotations 只是回答里引用到的子集；两者合并去重。
+        sources: list[tuple[str, str]] = []
+        images: list[tuple[str, str]] = []
+        image_search_count = 0
+        for group in msg.get("server_tool_calls") or []:
+            for call in group.get("calls") or []:
+                if call.get("kind") != "image_search":
+                    continue
+                if call.get("status") not in (None, "completed"):
+                    continue
+                image_search_count += 1
+                for s in call.get("sources") or []:
+                    url = s.get("url") or ""
+                    title = s.get("title") or s.get("site_name") or url
+                    if url:
+                        sources.append((title, url))
+                    iu = s.get("image_url") or ""
+                    if iu:
+                        images.append((title, iu))
+        for a in msg.get("annotations") or []:
+            cite = a.get("url_citation") or {}
+            url = cite.get("url") or ""
+            if url:
+                sources.append((cite.get("title") or url, url))
+        sources = list(dict.fromkeys(sources))
+        images = list(dict.fromkeys(images))
+
+        tool_use = ((j.get("usage") or {}).get("server_tool_use") or {})
+        usage_count = int(tool_use.get("tool_image_search") or 0)
+        image_search_count = max(image_search_count, usage_count)
+        verified = image_search_count > 0 and bool(sources)
+
+        logger.info(
+            f"[image_search] deepseek {model}: text={len(text)}字, sources={len(sources)}, "
+            f"images={len(images)}, image_search={image_search_count}, verified={verified}"
+        )
+        if not text:
+            raise RuntimeError("DeepSeek 返回空结果（可能触发安全审核、额度不足或模型不支持视觉）")
+        if not verified and self.deepseek_require_search:
+            raise RuntimeError(
+                "DeepSeek 未真正触发图搜（纯识图结果不可信，已按配置丢弃）"
+            )
+        return {
+            "engine": "deepseek", "model_used": model, "text": text,
+            "sources": sources[: self.max_results],
+            "images": images[: self.max_results],
+            "image_search_count": image_search_count,
+            "verified": verified,
+        }
+
 # ---------------- 引擎：SauceNAO ----------------
 
     async def _saucenao(self, client: httpx.AsyncClient, img_bytes: bytes, filename: str) -> dict:
@@ -1231,6 +1424,7 @@ class ImageSearchPlugin(BasePlugin):
         st.append("百度识图: " + ("启用" if self.enable_baidu else "未启用"))
         st.append("Yandex识图: " + ("启用" if self.enable_yandex else "未启用"))
         st.append("千问图搜图: " + ("启用" if (self.enable_qwen and self.qwen_key) else "未启用" + ("(缺key)" if self.enable_qwen else "")))
+        st.append("DeepSeek图搜: " + ("启用" if (self.enable_deepseek and self.deepseek_key) else "未启用" + ("(缺key)" if self.enable_deepseek else "")))
         st.append("GoogleLens(SerpApi): " + ("启用" if (self.enable_serpapi and self.serpapi_key) else "未启用" + ("(缺key)" if self.enable_serpapi else "")))
         return st
 
@@ -1249,10 +1443,17 @@ class ImageSearchPlugin(BasePlugin):
         cache_key = ""
         if md5:
             cache_key = md5 + ("|" + ",".join(sorted(only)) if only else "")
-            # 工具通道默认跳过千问，命令通道会跑千问：两者结果不同，缓存键必须区分，
-            # 否则工具通道先缓存后，命令通道会命中并永远看不到千问结果。
+            # 工具通道默认跳过千问/DeepSeek，命令通道会跑：两者结果不同，缓存键必须区分，
+            # 否则工具通道先缓存后，命令通道会命中并永远看不到完整结果。
+            skipped = []
             if channel == "tool" and not self.enable_qwen_in_tool:
-                cache_key += "|noqwen"
+                skipped.append("noqwen")
+            if channel == "tool" and not self.deepseek_in_tool:
+                skipped.append("nodeepseek")
+            if channel == "tool" and not self.iqdb_in_tool:
+                skipped.append("noiqdb")
+            if skipped:
+                cache_key += "|" + ",".join(skipped)
         if cache_key:
             cached = self._cache_get(cache_key)
             if cached:
@@ -1281,7 +1482,9 @@ class ImageSearchPlugin(BasePlugin):
             if want("saucenao") and self.enable_saucenao and self.saucenao_key:
                 tasks["saucenao"] = asyncio.create_task(self._saucenao(client, img_bytes, filename))
             if want("iqdb") and self.enable_iqdb:
-                tasks["iqdb"] = asyncio.create_task(self._iqdb(client, img_bytes, filename))
+                # IQDB 服务端反爬、首次常 45–130s：工具通道默认不跑，命令通道照跑
+                if channel != "tool" or self.iqdb_in_tool:
+                    tasks["iqdb"] = asyncio.create_task(self._iqdb(client, img_bytes, filename))
             # trace.moe 只对番剧截图有效（官方称 <90% 基本为错误结果）：
             # only 显式包含（搜番命令/工具）时总是跑；only is None（搜图/工具）时默认不跑
             if want("tracemoe") and self.enable_tracemoe and (only is not None or self.tracemoe_in_image_search):
@@ -1299,6 +1502,14 @@ class ImageSearchPlugin(BasePlugin):
                     budget = float(self.qwen_timeout) if channel != "tool" else min(float(self.qwen_timeout), 50.0)
                     tasks["qwen"] = asyncio.create_task(
                         self._qwen_lens(qwen_client, img_bytes, filename, source_url, budget)
+                    )
+            if want("deepseek") and self.enable_deepseek and self.deepseek_key:
+                # DeepSeek 是国内服务，走直连 client；工具通道默认不跑（含联网图搜，较慢且计费）
+                if channel != "tool" or self.deepseek_in_tool:
+                    budget = (float(self.deepseek_timeout) if channel != "tool"
+                              else min(float(self.deepseek_timeout), 50.0))
+                    tasks["deepseek"] = asyncio.create_task(
+                        self._deepseek_lens(direct_client, img_bytes, filename, budget)
                     )
             if want("serpapi") and self.enable_serpapi and self.serpapi_key:
                 tasks["serpapi"] = asyncio.create_task(
@@ -1583,6 +1794,22 @@ class ImageSearchPlugin(BasePlugin):
         if results.get("qwen_skipped"):
             lines.append("[千问图搜图] 本次未运行（LLM 工具通道默认关闭千问以保证响应速度，并非故障）")
 
+        dsr = results.get("deepseek")
+        if isinstance(dsr, dict) and dsr.get("text"):
+            has_any = True
+            dtext = dsr["text"]
+            if len(dtext) > 450:
+                dtext = dtext[:450] + "…"
+            lines.append(f"[DeepSeek图搜] {dtext}")
+            if not dsr.get("verified", True):
+                lines.append("（未使用在线搜图，可能不准确，仅供参考）")
+            for title, url in (dsr.get("sources") or [])[: self.max_results]:
+                links.append(url)
+            for title, image_url in (dsr.get("images") or [])[:2]:
+                links.append(image_url)
+        elif isinstance(dsr, Exception):
+            lines.append(f"[DeepSeek图搜] 查询失败: {dsr}")
+
         gem = results.get("gemini")
         if isinstance(gem, dict) and gem.get("text"):
             has_any = True
@@ -1603,7 +1830,14 @@ class ImageSearchPlugin(BasePlugin):
                     f"[百度识图] 识图猜测图中主体是:「{g}」"
                     "（这是识图引擎的实体猜测，名字通常较准但作品归属可能张冠李戴，请把名字和作品拆开看待）"
                 )
-            for s in (bd.get("sources") or [])[: self.max_results]:
+            bd_sources, _bd_seen = [], set()
+            for s in bd.get("sources") or []:
+                key = (s.get("url") or "", (s.get("title") or "").strip())
+                if key in _bd_seen:
+                    continue
+                _bd_seen.add(key)
+                bd_sources.append(s)
+            for s in bd_sources[: self.max_results]:
                 has_any = True
                 seg = f"[百度识图] 来源页标题:「{s['title']}」"
                 if s["website"]:
@@ -1624,10 +1858,18 @@ class ImageSearchPlugin(BasePlugin):
         if isinstance(yx, dict):
             tags = yx.get("tags") or []
             # 站点列表在前（包含此图的网页是可靠证据），tags 放最后（AI 猜测，仅作旁证）
-            for s in (yx.get("sites") or [])[: self.max_results]:
+            yx_sites, _yx_seen = [], set()
+            for s in yx.get("sites") or []:
                 title = s.get("title") or ""
                 if not title:
                     continue
+                key = title.strip().lower()
+                if key in _yx_seen:
+                    continue
+                _yx_seen.add(key)
+                yx_sites.append(s)
+            for s in yx_sites[: self.max_results]:
+                title = s.get("title") or ""
                 has_any = True
                 seg = f"[Yandex识图] 包含此图的网页:「{title}」"
                 if s.get("domain"):
@@ -1708,7 +1950,7 @@ class ImageSearchPlugin(BasePlugin):
             lines.append("各引擎均未返回有效结果（可能不是动漫图，或图片太模糊/被裁剪过）。")
         lines.append("(引擎状态: " + "; ".join(self._engine_status()) + ")")
         if links:
-            uniq = list(dict.fromkeys(links))[:4]
+            uniq = list(dict.fromkeys(links))[:6]
             lines.append(
                 "请综合以上各引擎结果回答用户：外文（俄语/日语/英语）标题自行翻译理解，"
                 "多引擎交叉一致的结论最可信；引擎间结论冲突时说明分歧并给出你判断最可能的答案，"
@@ -1789,6 +2031,21 @@ class ImageSearchPlugin(BasePlugin):
                 lines.append(f"  {title}: {url}")
         elif isinstance(qw, Exception):
             lines.append(f"【千问图搜图】查询失败: {qw}")
+
+        dsr = results.get("deepseek")
+        if isinstance(dsr, dict) and dsr.get("text"):
+            dtext = dsr["text"]
+            if len(dtext) > 500:
+                dtext = dtext[:500] + "…"
+            lines.append(f"【DeepSeek图搜】{dtext}")
+            if not dsr.get("verified", True):
+                lines.append("（未使用在线搜图，可能不准确，仅供参考）")
+            for title, url in (dsr.get("sources") or [])[: self.max_results]:
+                lines.append(f"  {title}: {url}")
+            for title, image_url in (dsr.get("images") or [])[:2]:
+                lines.append(f"  [图搜图片] {title}: {image_url}")
+        elif isinstance(dsr, Exception):
+            lines.append(f"【DeepSeek图搜】查询失败: {dsr}")
 
         bd = results.get("baidu")
         if isinstance(bd, dict):
